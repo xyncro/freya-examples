@@ -1,0 +1,9 @@
+﻿group Common
+
+  Chiron
+  Microsoft.Owin.SelfHost
+
+group Async
+
+  Freya
+  Freya.Polyfills.Katana
