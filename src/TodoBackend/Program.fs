@@ -1,4 +1,225 @@
 ﻿
+(* Overview
+
+   This is an idiosyncratic Freya implementation of a small and light server
+   to implement the TodoBackend example application. The code is relatively
+   minimal, and only implements the minimum to meet the requirements of the
+   application.
+
+   Support for more HTTP features and more fully "correct" support for resource
+   design would be simple to add to the exposed API.
+
+   See [http://www.todobackend.com] for more. *)
+
+(* Domain
+
+   We'll build a simple domain model, and an in-memory data store using a
+   simple F# MailboxProcessor to serialize access to the state. This will give
+   a simple but well-typed API.
+
+   We'll also use Chiron to make the types representing input and output easily
+   serializable to/from JSON as required. *)
+
+module Domain =
+
+    open System
+    open Aether
+    open Aether.Operators
+    open Chiron
+    open Chiron.Operators
+
+    (* Types
+
+       Some simple types representing a Todo item, and the New and Patch types
+       which will form the input surface for the model.
+
+       Note that they include Chiron ToJson and FromJson members as appropriate
+       to allow for simple serialization. *)
+
+    type Todo =
+        { Id: Guid
+          Url: string
+          Order: int option
+          Title: string
+          Completed: bool }
+
+        static member ToJson (x: Todo) =
+                Json.write "id" x.Id
+             *> Json.write "url" x.Url
+             *> Json.write "order" x.Order
+             *> Json.write "title" x.Title
+             *> Json.write "completed" x.Completed
+
+        static member create =
+            fun (newTodo: NewTodo) ->
+                let id =
+                    Guid.NewGuid ()
+
+                { Id = id
+                  Url = sprintf "http://localhost:7000/%A" id
+                  Order = newTodo.Order
+                  Title = newTodo.Title
+                  Completed = false }
+
+     and NewTodo =
+        { Title: string
+          Order: int option }
+
+        static member FromJson (_: NewTodo) =
+                fun t o ->
+                    { Title = t
+                      Order = o }
+            <!> Json.read "title"
+            <*> Json.tryRead "order"
+
+     and PatchTodo =
+        { Title: string option
+          Order: int option
+          Completed: bool option }
+
+        static member FromJson (_: PatchTodo) =
+                fun t o c ->
+                    { Title = t
+                      Order = o
+                      Completed = c }
+            <!> Json.tryRead "title"
+            <*> Json.tryRead "order"
+            <*> Json.tryRead "completed"
+
+    (* State
+
+       Types for storing and interacting with the state of our domain model,
+       which will be encapsulated in a mailbox processor. *)
+
+    type State =
+        { Todos: Map<Guid,Todo> }
+
+        static member todos_ =
+            (fun x -> x.Todos), (fun t x -> { x with Todos = t })
+
+        static member empty =
+            { Todos = Map.empty}
+
+    type Protocol =
+        | Add of AsyncReplyChannel<Todo> * NewTodo
+        | Clear of AsyncReplyChannel<unit>
+        | Delete of AsyncReplyChannel<unit> * Guid
+        | Get of AsyncReplyChannel<Todo option> * Guid
+        | List of AsyncReplyChannel<Todo list>
+        | Update of AsyncReplyChannel<Todo> * Guid * PatchTodo
+
+    (* Optics
+
+       Useful optics for interacting with the State at various levels, in this
+       case for interacting with the complete set of Todos, and an individual
+       Todo by ID. *)
+
+    let todos_ =
+            State.todos_
+
+    let todo_ id =
+            todos_
+        >-> Map.value_ id
+
+    (* Processor
+
+       A simple processor loop with internal logic to handle responding to
+       our communication protocol, and a mailbox processor to provide a global
+       running instance of the processor loop. *)
+
+    let processor (mailbox: MailboxProcessor<Protocol>) =
+
+        (* Reply
+
+           Simple returning reply function. *)
+
+        let reply (channel: AsyncReplyChannel<_>) x =
+            channel.Reply x
+            x
+
+        (* Operations
+
+           Individual operations over state, returning the appropriate value
+           asynchronously. *)
+
+        let add channel newTodo =
+            Todo.create newTodo
+            |> reply channel
+            |> fun x -> Optic.set (todo_ x.Id) (Some x)
+
+        let clear channel =
+            ()
+            |> reply channel
+            |> fun _ -> Optic.set todos_ Map.empty
+
+        let delete channel id =
+            ()
+            |> reply channel
+            |> fun _ -> Optic.set (todo_ id) None
+
+        let get channel id state =
+            Optic.get (todo_ id) state
+            |> reply channel
+            |> fun _ -> state
+
+        let list channel state =
+            Optic.get todos_ state
+            |> Map.toList
+            |> List.map snd
+            |> reply channel
+            |> fun _ -> state
+
+        let update channel id patchTodo state =
+            Optic.get (todo_ id) state
+            |> Option.get
+            |> fun x -> (function | Some t -> { x with Title = t } | _ -> x) patchTodo.Title
+            |> fun x -> (function | Some o -> { x with Order = Some o } | _ -> x) patchTodo.Order
+            |> fun x -> (function | Some c -> { x with Completed = c } | _ -> x) patchTodo.Completed
+            |> reply channel
+            |> fun x -> Optic.set (todo_ id) (Some x) state
+
+        (* Loop
+
+           Processing loop for receiving commands and dispatching asynchrnously
+           based on the defined domain protocol. *)
+
+        let rec loop (state: State) =
+            async.Bind (mailbox.Receive (),
+                function | Add (channel, newTodo) -> loop (add channel newTodo state)
+                         | Clear (channel) -> loop (clear channel state)
+                         | Delete (channel, id) -> loop (delete channel id state)
+                         | Get (channel, id) -> loop (get channel id state)
+                         | List (channel) -> loop (list channel state)
+                         | Update (channel, id, patchTodo) -> loop (update channel id patchTodo state))
+
+        loop State.empty
+
+    let state =
+        MailboxProcessor.Start (processor)
+
+    (* API
+
+       The usable API of our domain model, consisting of simple functions
+       interacting with the global state. *)
+
+    let add newTodo =
+        state.PostAndAsyncReply (fun channel -> Add (channel, newTodo))
+
+    let clear () =
+        state.PostAndAsyncReply (fun channel -> Clear (channel))
+
+    let delete id =
+        state.PostAndAsyncReply (fun channel -> Delete (channel, id))
+
+    let get id =
+        state.PostAndAsyncReply (fun channel -> Get (channel, id))
+
+    let list () =
+        state.PostAndAsyncReply (fun channel -> List (channel))
+
+    let update (id, patchTodo) =
+        state.PostAndAsyncReply (fun channel -> Update (channel, id, patchTodo))
+
 (* API
 
    We'll expose our domain model to the world using Freya to map the internal
@@ -22,8 +243,6 @@ module Api =
     open Freya.Routers.Uri.Template
     open Freya.Types.Http
     open Freya.Types.Http.Patch
-
-    open TodoBackend.Domain
 
     (* Optics
 
@@ -67,40 +286,52 @@ module Api =
               Languages = None }
           Data = (Json.serialize >> Json.format >> Encoding.UTF8.GetBytes) x }
 
-    (* Route *)
+    (* Route
+
+       Values associated with the route, in this case the ID of the todo in
+       question. As we only ever call use this value when a route containing an
+       ID has been matched, we take a shortcut and map to Option.get to avoid
+       propagating the option value. *)
 
     let id =
         Freya.memo (Option.get <!> Freya.Optic.get (Route.atom_ "id" >?> guid_))
 
-    (* Operations *)
+    (* Operations
+
+       Mapping of contextual information (properties of the request, such as
+       the ID and payload (where applicable) mapped to functions of the
+       domain.
+
+       All functions are wrapped in a memoization function, so that they may be
+       used multiple times per request, but only evaluated once. *)
 
     let add =
-        Freya.memo (payload () >>= fun p -> Freya.fromAsync (p.Value, addTodo))
+        Freya.memo (payload () >>= fun p -> Freya.fromAsync (p.Value, Domain.add))
 
     let clear =
-        Freya.memo (Freya.fromAsync ((), clearTodos))
+        Freya.memo (Freya.fromAsync ((), Domain.clear))
 
     let delete =
-        Freya.memo (id >>= fun i -> Freya.fromAsync (i, deleteTodo))
+        Freya.memo (id >>= fun i -> Freya.fromAsync (i, Domain.delete))
 
     let get =
-        Freya.memo (id >>= fun i -> Freya.fromAsync (i, getTodo))
+        Freya.memo (id >>= fun i -> Freya.fromAsync (i, Domain.get))
 
     let list =
-        Freya.memo (Freya.fromAsync ((), listTodos))
+        Freya.memo (Freya.fromAsync ((), Domain.list))
 
     let update =
-        Freya.memo (id >>= fun i -> payload () >>= fun p -> Freya.fromAsync ((i, p.Value), updateTodo))
+        Freya.memo (id >>= fun i -> payload () >>= fun p -> Freya.fromAsync ((i, p.Value), Domain.update))
 
-    (* Machine
-       We define the functions that we'll use for decisions and resources
-       within our freyaMachine expressions here. We can use the results of
-       operations like "add" multiple times without worrying as we memoized
-       that function.
-       We also define a resource (common) of common properties of a resource,
-       this saves us repeating configuration multiple times (once per resource).
-       Finally we define our two resources, the first for the collection of Todos,
-       the second for an individual Todo. *)
+    (* Resources
+
+       We use Freya HTTP machines to model our two resources, a collection of
+       Todo items, and an individual Todo item. Each resource has appropriate
+       properties defined, and each includes CORS support (using default CORS
+       configuration).
+
+       Additionally the individual Todo resource also includes PATCH support,
+       and supports a PATCH action. *)
 
     let todos =
         freyaMachine {
