@@ -158,7 +158,7 @@ NUGET
       Anat (>= 1.0 < 2.0)
       Hekate (>= 3.2 < 4.0)
       Hopac (>= 0.0 < 1.0)
-    Hopac (0.2.1)
+    Hopac (0.3.7)
       FSharp.Core (>= 3.1.2.5)
   remote: https://www.myget.org/F/freya/api/v2
     Freya.Core.Hopac (3.0.0-rc01)
