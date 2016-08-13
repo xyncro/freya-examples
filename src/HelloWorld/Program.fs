@@ -38,8 +38,7 @@ module Hello =
 
     let helloRouter =
         freyaRouter {
-            resource "/hello/{name}" helloMachine }
-
+            resource "/hello{/name}" helloMachine }
 
 module Server =
 
