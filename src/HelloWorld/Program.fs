@@ -1,4 +1,11 @@
-﻿module Hello =
+﻿(* Hello
+
+   A very simple Freya example! Two simple functions to see whether the client
+   has supplied a name, and if so to use it in place of "World" in the classic
+   greeting, a machine to deal with all of the complexities of HTTP, and a
+   router to make sure suitable requests end up in the right place. *)
+
+module Hello =
 
     open Freya.Core
     open Freya.Machines.Http
@@ -26,6 +33,10 @@
         freyaRouter {
             resource "/hello{/name}" machine }
 
+(* Server
+
+   A minimal server type, using Katana to host our Hello World program. *)
+
 module Server =
 
     open Freya.Core
@@ -33,7 +44,7 @@ module Server =
     (* Katana
 
        Katana (Owin Self Hosting) expects us to expose a type with a specific
-       method. Freya lets us do see easily, the OwinAppFunc module providing
+       method. Freya lets us do so easily, the OwinAppFunc module providing
        functions to turn any Freya<'a> function in to a suitable value for
        OWIN compatible hosts such as Katana. *)
 
