@@ -1,18 +1,4 @@
-﻿module Represent =
-
-    open System.Text
-    open Freya.Machines.Http
-    open Freya.Types.Http
-
-    let text (str: string) =
-        { Description =
-            { Charset = Some Charset.Utf8
-              Encodings = None
-              MediaType = Some MediaType.Text
-              Languages = None }
-          Data = Encoding.UTF8.GetBytes str }
-
-module Hello =
+﻿module Hello =
 
     open Freya.Core
     open Freya.Machines.Http
@@ -32,13 +18,13 @@ module Hello =
 
             return Represent.text (sprintf "Hello %s!" name) }
 
-    let helloMachine =
+    let machine =
         freyaMachine {
             handleOk hello }
 
-    let helloRouter =
+    let router =
         freyaRouter {
-            resource "/hello{/name}" helloMachine }
+            resource "/hello{/name}" machine }
 
 module Server =
 
@@ -53,7 +39,7 @@ module Server =
 
     type HelloWorld () =
         member __.Configuration () =
-            OwinAppFunc.ofFreya (Hello.helloRouter)
+            OwinAppFunc.ofFreya (Hello.router)
 
 (* Main
 
