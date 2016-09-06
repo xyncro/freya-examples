@@ -10,7 +10,6 @@ group Common
 group Async
 
   source http://nuget.org/api/v2
-  source https://www.myget.org/F/freya/api/v2
 
   nuget Freya                  ~> 3.0.0-rc
   nuget Freya.Polyfills.Katana ~> 3.0.0-rc
@@ -18,7 +17,6 @@ group Async
 group Hopac
 
   source http://nuget.org/api/v2
-  source https://www.myget.org/F/freya/api/v2
 
   nuget Freya.Hopac                  ~> 3.0.0-rc
   nuget Freya.Polyfills.Katana.Hopac ~> 3.0.0-rc
