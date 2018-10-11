@@ -2,6 +2,8 @@ module TodoBackend.Program
 
 open KestrelInterop
 
+// Run http://todobackend.com/specs/index.html?http://localhost:5000/ to test the implementation.
+
 [<EntryPoint>]
 let main argv =
     let configureApp =

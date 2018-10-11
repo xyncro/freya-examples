@@ -57,7 +57,7 @@ module Domain =
                     Guid.NewGuid ()
 
                 { Id = id
-                  Url = sprintf "http://localhost:7000/%A" id
+                  Url = sprintf "http://localhost:5000/%A" id
                   Order = newTodo.Order
                   Title = newTodo.Title
                   Completed = false }
