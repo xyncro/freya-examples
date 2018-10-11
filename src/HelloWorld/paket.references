@@ -1,8 +1,0 @@
-﻿group Common
-
-  Microsoft.Owin.SelfHost
-
-group Async
-
-  Freya
-  Freya.Polyfills.Katana

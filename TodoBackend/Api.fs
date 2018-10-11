@@ -1,4 +1,5 @@
-﻿
+namespace TodoBackend
+
 (* Overview
 
    This is an idiosyncratic Freya implementation of a small and light server
@@ -306,22 +307,39 @@ module Api =
        used multiple times per request, but only evaluated once. *)
 
     let add =
-        Freya.memo (payload () >>= fun p -> Freya.fromAsync (p.Value, Domain.add))
+        freya {
+            let! p = payload()
+            return! Freya.fromAsync(Domain.add p.Value)
+        }
+        |> Freya.memo
 
     let clear =
-        Freya.memo (Freya.fromAsync ((), Domain.clear))
+        Freya.memo (Freya.fromAsync (Domain.clear ()))
 
     let delete =
-        Freya.memo (id >>= fun i -> Freya.fromAsync (i, Domain.delete))
+        freya {
+            let! i = id
+            return! Freya.fromAsync(Domain.delete i)
+        }
+        |> Freya.memo
 
     let get =
-        Freya.memo (id >>= fun i -> Freya.fromAsync (i, Domain.get))
+        freya {
+            let! i = id
+            return! Freya.fromAsync(Domain.get i)
+        }
+        |> Freya.memo
 
     let list =
-        Freya.memo (Freya.fromAsync ((), Domain.list))
+        Freya.memo (Freya.fromAsync (Domain.list ()))
 
     let update =
-        Freya.memo (id >>= fun i -> payload () >>= fun p -> Freya.fromAsync ((i, p.Value), Domain.update))
+        freya {
+            let! i = id
+            let! p = payload()
+            return! Freya.fromAsync(Domain.update(i, p.Value))
+        }
+        |> Freya.memo
 
     (* Resources
 
@@ -372,44 +390,5 @@ module Api =
        we would expect to see multiple components of the application pipelined
        to form a more complex whole, but in this case we only have our single router. *)
 
-    let api =
+    let root =
         todoRouter
-
-(* Server
-
-   The basic types we need to hook up the API built with Freya to a common web
-   server, in this case Katana. *)
-
-module Server =
-
-    open Freya.Core
-
-    (* Katana
-
-       Katana (Owin Self Hosting) expects us to expose a type with a specific
-       method. Freya lets us do see easily, the OwinAppFunc module providing
-       functions to turn any Freya<'a> function in to a suitable value for
-       OWIN compatible hosts such as Katana. *)
-
-    type TodoBackend () =
-        member __.Configuration () =
-            OwinAppFunc.ofFreya (Api.api)
-
-(* Main
-
-   A very simple program, simply a console app, with a blocking read from
-   the console to keep our server from shutting down immediately. Though
-   we are self hosting here as a console application, the same application
-   should be easily transferrable to any OWIN compatible server, including
-   IIS. *)
-
-open System
-open Microsoft.Owin.Hosting
-
-[<EntryPoint>]
-let main _ =
-
-    let _ = WebApp.Start<Server.TodoBackend> ("http://localhost:7000")
-    let _ = Console.ReadLine ()
-
-    0
